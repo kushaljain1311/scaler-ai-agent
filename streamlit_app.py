@@ -97,19 +97,17 @@ def _send_text_wa(to: str, message: str):
 
 
 def _upload_pdf(pdf_bytes: bytes, filename: str) -> str:
-    """Upload PDF to file.io and return a public URL. maxDownloads=100 so Twilio + user can both fetch it."""
+    """Upload PDF to 0x0.st and return a public URL."""
     r = httpx.post(
-        "https://file.io/",
+        "https://0x0.st",
         files={"file": (filename, pdf_bytes, "application/pdf")},
-        data={"expires": "14d", "maxDownloads": "100"},
         timeout=30.0,
     )
-    st.write(f"file.io HTTP status: {r.status_code}")
-    data = r.json()
-    st.write(f"file.io response: {data}")
-    if not data.get("success"):
-        raise RuntimeError(f"PDF upload failed: {data.get('message', data)}")
-    return data["link"]
+    st.write(f"Upload HTTP status: {r.status_code}")
+    st.write(f"Upload response: {r.text[:300]}")
+    if r.status_code != 200:
+        raise RuntimeError(f"PDF upload failed: HTTP {r.status_code} — {r.text[:200]}")
+    return r.text.strip()
 
 
 def _send_pdf_via_twilio(to: str, pdf_url: str, message: str) -> str:

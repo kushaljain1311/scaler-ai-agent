@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+openai
+twilio
+xhtml2pdf>=0.2.17
+python-multipart
+python-dotenv
+httpx
+pydantic
+streamlit

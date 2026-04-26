@@ -97,17 +97,20 @@ def _send_text_wa(to: str, message: str):
 
 
 def _upload_pdf(pdf_bytes: bytes, filename: str) -> str:
-    """Upload PDF to 0x0.st and return a public URL."""
+    """
+    FIXED: Uses file.io instead of 0x0.st to avoid HTTP 503 errors.
+    """
     r = httpx.post(
-        "https://0x0.st",
+        "https://file.io",
         files={"file": (filename, pdf_bytes, "application/pdf")},
         timeout=30.0,
     )
-    st.write(f"Upload HTTP status: {r.status_code}")
-    st.write(f"Upload response: {r.text[:300]}")
+    
     if r.status_code != 200:
         raise RuntimeError(f"PDF upload failed: HTTP {r.status_code} — {r.text[:200]}")
-    return r.text.strip()
+    
+    # file.io returns a JSON response, so we grab the 'link' value
+    return r.json().get("link")
 
 
 def _send_pdf_via_twilio(to: str, pdf_url: str, message: str) -> str:

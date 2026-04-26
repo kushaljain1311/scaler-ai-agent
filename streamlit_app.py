@@ -96,26 +96,31 @@ def _send_text_wa(to: str, message: str):
     )
 
 
-def _upload_and_send_pdf_wa(to: str, pdf_bytes: bytes, filename: str, message: str):
-    """Upload PDF to file.io (free, no auth) then send via Twilio WhatsApp."""
+def _upload_pdf(pdf_bytes: bytes, filename: str) -> str:
+    """Upload PDF to file.io and return a public URL. maxDownloads=100 so Twilio + user can both fetch it."""
     r = httpx.post(
         "https://file.io/",
         files={"file": (filename, pdf_bytes, "application/pdf")},
-        data={"expires": "14d"},
+        data={"expires": "14d", "maxDownloads": "100"},
         timeout=30.0,
     )
+    st.write(f"file.io HTTP status: {r.status_code}")
     data = r.json()
+    st.write(f"file.io response: {data}")
     if not data.get("success"):
         raise RuntimeError(f"PDF upload failed: {data.get('message', data)}")
-    pdf_url = data["link"]
+    return data["link"]
 
+
+def _send_pdf_via_twilio(to: str, pdf_url: str, message: str) -> str:
     client = TwilioClient(_env("TWILIO_ACCOUNT_SID"), _env("TWILIO_AUTH_TOKEN"))
-    client.messages.create(
+    msg = client.messages.create(
         from_=_env("TWILIO_WHATSAPP_FROM") or "whatsapp:+14155238886",
         to=_normalise_wa(to),
         body=message,
         media_url=[pdf_url],
     )
+    return msg.sid
 
 
 # ── Session state init ────────────────────────────────────────────────────────
@@ -315,14 +320,20 @@ with col_pdf:
         if lead_phone.strip():
             if st.button("Send PDF to Lead's WhatsApp", use_container_width=True):
                 msg = f"Hi {name}! Here's your personalized Scaler overview based on our conversation today."
-                with st.spinner("Uploading and sending PDF..."):
-                    try:
-                        _upload_and_send_pdf_wa(lead_phone, st.session_state.pdf_bytes, filename, msg)
-                        st.success(f"PDF sent to {lead_phone}!")
-                    except TwilioRestException as e:
-                        st.error(_handle_twilio_error(e))
-                    except Exception as e:
-                        st.error(str(e))
+                try:
+                    with st.spinner("Step 1/2 — Uploading PDF to get public URL..."):
+                        pdf_url = _upload_pdf(st.session_state.pdf_bytes, filename)
+                    st.info(f"PDF uploaded. Public URL: {pdf_url}")
+
+                    with st.spinner("Step 2/2 — Sending via Twilio WhatsApp..."):
+                        sid = _send_pdf_via_twilio(lead_phone, pdf_url, msg)
+                    st.success(f"Sent! Twilio SID: {sid}")
+                except TwilioRestException as e:
+                    st.error(_handle_twilio_error(e))
+                    st.exception(e)
+                except Exception as e:
+                    st.error(str(e))
+                    st.exception(e)
         else:
             st.caption("Enter the lead's WhatsApp number in the sidebar to send the PDF.")
 

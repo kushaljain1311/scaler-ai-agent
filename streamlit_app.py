@@ -98,35 +98,41 @@ def _send_text_wa(to: str, message: str):
 
 def _upload_pdf(pdf_bytes: bytes, filename: str) -> str:
     """
-    UPLOAD FIX: 
-    1. Switched to file.io (replaces 0x0.st 503 error)
-    2. Added follow_redirects=True (replaces 301 error)
-    3. Added JSON parsing for the new service
+    ULTIMATE FIX: Switched to bashupload.com
+    - No JSON parsing (avoids 'line 1 column 1' errors)
+    - Follows redirects (avoids 301 errors)
+    - Files persist for a few days (so Twilio won't miss the file)
     """
     try:
-        # Using a Client with follow_redirects=True is the standard fix for 301 errors
-        with httpx.Client(follow_redirects=True) as client:
+        # We use follow_redirects and a standard User-Agent to look like a browser
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        with httpx.Client(follow_redirects=True, headers=headers) as client:
+            # bashupload.com accepts a simple POST
             r = client.post(
-                "https://file.io",
+                "https://bashupload.com",
                 files={"file": (filename, pdf_bytes, "application/pdf")},
                 timeout=30.0,
             )
         
-        # Check for HTTP errors
-        r.raise_for_status()
-            
-        res_json = r.json()
+        # Check if server responded correctly
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"Server returned {r.status_code}: {r.text[:100]}")
+
+        # bashupload returns the URL as plain text in the response body
+        # It usually looks like: "https://bashupload.com/xyz/filename.pdf"
+        url = r.text.strip()
         
-        # file.io returns a success boolean in their JSON
-        if not res_json.get("success"):
-            error_msg = res_json.get("message", "Unknown error from file.io")
-            raise RuntimeError(f"file.io reported failure: {error_msg}")
+        # Quick validation to ensure we actually got a URL
+        if "http" not in url:
+            raise RuntimeError(f"Invalid response from server: {url[:100]}")
             
-        return res_json.get("link")
-        
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"Server responded with error: {e.response.status_code} - {e.response.text}")
+        return url
+
     except Exception as e:
+        # This will catch connection issues or server errors
         raise RuntimeError(f"PDF upload failed: {str(e)}")
 
 def _send_pdf_via_twilio(to: str, pdf_url: str, message: str) -> str:

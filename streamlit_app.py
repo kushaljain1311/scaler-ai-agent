@@ -98,20 +98,36 @@ def _send_text_wa(to: str, message: str):
 
 def _upload_pdf(pdf_bytes: bytes, filename: str) -> str:
     """
-    FIXED: Uses file.io instead of 0x0.st to avoid HTTP 503 errors.
+    UPLOAD FIX: 
+    1. Switched to file.io (replaces 0x0.st 503 error)
+    2. Added follow_redirects=True (replaces 301 error)
+    3. Added JSON parsing for the new service
     """
-    r = httpx.post(
-        "https://file.io",
-        files={"file": (filename, pdf_bytes, "application/pdf")},
-        timeout=30.0,
-    )
-    
-    if r.status_code != 200:
-        raise RuntimeError(f"PDF upload failed: HTTP {r.status_code} — {r.text[:200]}")
-    
-    # file.io returns a JSON response, so we grab the 'link' value
-    return r.json().get("link")
-
+    try:
+        # Using a Client with follow_redirects=True is the standard fix for 301 errors
+        with httpx.Client(follow_redirects=True) as client:
+            r = client.post(
+                "https://file.io",
+                files={"file": (filename, pdf_bytes, "application/pdf")},
+                timeout=30.0,
+            )
+        
+        # Check for HTTP errors
+        r.raise_for_status()
+            
+        res_json = r.json()
+        
+        # file.io returns a success boolean in their JSON
+        if not res_json.get("success"):
+            error_msg = res_json.get("message", "Unknown error from file.io")
+            raise RuntimeError(f"file.io reported failure: {error_msg}")
+            
+        return res_json.get("link")
+        
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"Server responded with error: {e.response.status_code} - {e.response.text}")
+    except Exception as e:
+        raise RuntimeError(f"PDF upload failed: {str(e)}")
 
 def _send_pdf_via_twilio(to: str, pdf_url: str, message: str) -> str:
     client = TwilioClient(_env("TWILIO_ACCOUNT_SID"), _env("TWILIO_AUTH_TOKEN"))

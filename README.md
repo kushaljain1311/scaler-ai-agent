@@ -1,140 +1,87 @@
 # Scaler AI BDA Agent
 
-AI-powered sales agent for Scaler's BDA team. Generates personalised pre-call WhatsApp nudges for BDAs and post-call PDF overviews for leads.
-
-## Stack
-
-| Layer | Tech |
-|-------|------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS |
-| Backend | Python FastAPI |
-| AI | OpenAI GPT-4o + Whisper |
-| WhatsApp | Twilio WhatsApp Sandbox |
-| PDF | WeasyPrint |
+**Live app:** https://scaler-ai-agent-uewqnofpet9xvkgggzxqrf.streamlit.app/  
+**Loom demo:** https://www.loom.com/share/07aaeaf09389491b80e3d0e8da8522a0
 
 ---
 
-## Setup
+## What I built
 
-### 1. Clone / navigate to project
+An AI agent that supercharges two drop-off moments in Scaler's sales funnel. Before a call, it sends the BDA a scannable WhatsApp brief — not a script, but a strategy: who this person really is, what discovery questions to ask, which objections to expect (extracted only from the actual transcript, not invented), and one thing to avoid. After the call, it generates a 2–3 page personalised PDF that answers each question the lead actually asked, with ROI reasoning and verified Scaler facts — no hallucinated curriculum claims. The PDF is colour-coded by experience level (orange for freshers, blue for mid-level, purple for senior), routed through a BDA approval gate (Approve / Edit / Skip), and delivered to the lead's WhatsApp via Twilio. Both structured transcript and audio input (Whisper transcription) are supported. Built with FastAPI (Python backend) and Streamlit (frontend), deployed on Streamlit Cloud.
 
-```bash
-cd scaler-ai-agent
+---
+
+## One failure I found
+
+When the lead's transcript is very short or vague — under 5 exchanges — the question extractor sometimes returns only 1 question where 2–3 were implied. The PDF then has a single section, which feels thin. Root cause: the extraction prompt relies on explicit phrasing; subtext doesn't reliably surface. Fix would be a second-pass inference prompt.
+
+---
+
+## Scale plan
+
+At 100,000 leads/month the first thing that breaks is **PDF generation latency** — xhtml2pdf is synchronous and CPU-bound, so concurrent requests will queue and time out under load. Fix: move PDF generation to a task queue (Celery + Redis) with async workers, and cache identical persona-type outputs for ~1 hour. Second constraint is **Twilio WhatsApp throughput** — the sandbox has strict rate limits and production WhatsApp Business API requires Meta approval with a 3–7 day review cycle. Both are solvable but need lead time before scale.
+
+---
+
+## PDF delivery note
+
+WhatsApp PDF delivery requires a **publicly accessible URL** for the media attachment. On the deployed Streamlit app, PDFs are hosted at:
+
+```
+https://[your-streamlit-url]/static/[filename].pdf
 ```
 
-### 2. Backend
+If the Twilio send fails during your review, the PDF download link is visible directly in the UI as a fallback — click to download, then forward manually. This is a hosting constraint, not a logic one.
+
+---
+
+## Stack
+
+| Layer | Tool |
+|---|---|
+| Frontend | Streamlit |
+| Backend | FastAPI (Python) |
+| AI — text | OpenAI GPT-4o |
+| AI — audio | OpenAI Whisper |
+| PDF | xhtml2pdf |
+| WhatsApp | Twilio Sandbox |
+| Deploy | Streamlit Cloud |
+
+---
+
+## Running locally
 
 ```bash
+# Backend
 cd backend
-
-# Create virtual environment
 python -m venv venv
-
-# Activate (Windows)
-venv\Scripts\activate
-# Activate (Mac/Linux)
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# Frontend (separate terminal)
+cd frontend
+streamlit run app.py
 ```
 
-Fill in `backend/.env`:
-
+**Environment variables — create `backend/.env`:**
 ```
-OPENAI_API_KEY=        # https://platform.openai.com/api-keys
-TWILIO_ACCOUNT_SID=    # https://console.twilio.com → Account Info
-TWILIO_AUTH_TOKEN=     # https://console.twilio.com → Account Info
+OPENAI_API_KEY=sk-...
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 BACKEND_URL=http://localhost:8000
 ```
 
-**WeasyPrint on Windows** also requires GTK. Download and install from:
-https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases
-
-Start backend:
-
-```bash
-uvicorn main:app --reload
-```
-
-### 3. Frontend
-
-```bash
-cd frontend
-npm install
-```
-
-Fill in `frontend/.env.local` (already set to localhost:8000).
-
-Start frontend:
-
-```bash
-npm run dev
-```
+**Twilio sandbox opt-in:**  
+Send `join <your-keyword>` from your WhatsApp to `+14155238886`.  
+Both the BDA number and the lead test number must opt in before sending.
 
 ---
 
-## Twilio WhatsApp Sandbox setup
+## Decisions made
 
-1. Go to https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn
-2. Note the sandbox number: **+1 415 523 8886** and the join keyword shown
-3. From the BDA's WhatsApp, send: `join <keyword>` to **+14155238886**
-4. From the lead's WhatsApp (for PDF send), do the same
-5. You'll get a confirmation reply — the number is now opted in
-
----
-
-## Verify everything works
-
-```bash
-# Health check
-curl http://localhost:8000/health
-# Expected: {"status":"ok","model":"gpt-4o","timestamp":"..."}
-
-# Frontend
-open http://localhost:3000
-```
-
-### Manual test checklist
-
-- [ ] Health endpoint returns `{"status": "ok"}`
-- [ ] Frontend loads at localhost:3000
-- [ ] BDA phone validation rejects numbers without `+`
-- [ ] Persona quick-load fills all fields correctly
-- [ ] Audio toggle shows drag-and-drop zone
-- [ ] Run Agent button disabled when fields are empty
-- [ ] Progress steps animate correctly during run
-- [ ] Nudge sent panel shows green with full nudge text
-- [ ] PDF preview shows headline, sections, verified badges
-- [ ] Edit mode makes all PDF fields editable inline
-- [ ] Download PDF button downloads a valid PDF
-- [ ] Approve & Send disabled without lead phone, tooltip visible
-- [ ] Skip button resets to input screen
-- [ ] Backend-down error shows helpful message
-
----
-
-## Project structure
-
-```
-scaler-ai-agent/
-├── frontend/
-│   ├── app/
-│   │   ├── page.tsx        # Full UI (single client component)
-│   │   ├── layout.tsx
-│   │   └── globals.css
-│   ├── .env.local
-│   └── package.json
-│
-├── backend/
-│   ├── main.py             # FastAPI routes
-│   ├── prompts.py          # All OpenAI prompts
-│   ├── pdf_generator.py    # WeasyPrint HTML→PDF
-│   ├── whatsapp.py         # Twilio send functions
-│   ├── static/             # Served PDFs (auto-created)
-│   ├── requirements.txt
-│   └── .env
-│
-└── README.md
-```
+- **Objections in nudge = transcript-only.** If the lead didn't say it, it's not listed. Invented objections make the BDA sound like they're reading a generic script.
+- **PDF sections = questions asked, not questions we wish they'd asked.** One section per extracted question, no more.
+- **Anti-hallucination by design.** All curriculum facts are grounded in a static verified knowledge base. If a fact isn't in the KB, the PDF says "confirm on scaler.com" rather than inventing.
+- **Tone shifts by YoE.** Meera (0 YoE) gets courage and parent-friendly framing. Rohan (4 YoE) gets ROI math. Karthik (9 YoE) gets peer-level respect, no fluff.
